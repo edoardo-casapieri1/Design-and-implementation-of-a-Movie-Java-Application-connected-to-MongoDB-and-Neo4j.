@@ -1,0 +1,150 @@
+//import dei nodi Film 
+LOAD CSV FROM 'file:///films.csv' AS line FIELDTERMINATOR '*'
+CREATE (:Film {_id: line[0], original_title: line[1], italian_title: line[2], year: toInteger(line[3]), runtime: toInteger(line[4])})
+
+//Import dei nodi Utente
+LOAD CSV FROM 'file:///users.csv' AS line FIELDTERMINATOR '*'
+CREATE (:User { _id: line[0], username: line[1]})
+
+//Delete di TUTTI i nodi 
+MATCH (n)
+DETACH DELETE n
+
+//Relazioni con film 
+LOAD CSV FROM 'file:///relationshipAdded.csv' AS line FIELDTERMINATOR '*'
+match (u: User), (f:Film)
+where u._id = line[0] and f._id = line[1]
+CREATE (u)-[add: ADDED{date: datetime(line[2]), rating: toFloat(line[3])}]->(f)
+
+//INDEX su _id degli user 
+CREATE INDEX FOR (u:User) ON (u.`_id`)
+//INDEX su _id dei film
+CREATE INDEX FOR (f:Film) ON (f.`_id`)
+
+//Query che restituisce tutti i film per un determinato utente 
+MATCH (n { username: 'timonthy198' })-[r:ADDED]->(c)
+RETURN n,r,c
+
+//Set corretto di true e false in favorite 
+MATCH (n)-[r:ADDED]->(c)
+where r.favorite = 'False' 
+set r.favorite = false 
+
+MATCH (n)-[r:ADDED]->(c)
+where r.favorite = 'True' 
+set r.favorite = true 
+
+//Create dei nodi Genere
+LOAD CSV FROM 'file:///genres.csv' AS line
+CREATE (:Genre { name: line[0]})
+
+//Create relazione genres films 
+LOAD CSV FROM 'file:///FilmGenres.csv' AS line FIELDTERMINATOR '*'
+match (g: Genre), (f:Film)
+where f._id = line[0] and g.name = line[1]
+CREATE (f)-[lab: LABELED]->(g)
+
+//Create dei nodi Attori 
+LOAD CSV FROM 'file:///actors.csv' AS line
+CREATE (:Actor { name: line[0]})
+
+//Create relazione film actors
+LOAD CSV FROM 'file:///FilmActors.csv' AS line FIELDTERMINATOR '*'
+match (a: Actor), (f:Film)
+where f._id = line[0] and a.name = line[1]
+CREATE (a)-[act: ACTED_IN]->(f)
+
+//Cercare attori di un certo film 
+match (a:Actor)-[act:ACTED_IN]->(f:Film {original_title:"Pulp Fiction"})
+return a,act,f
+
+//Creazione dei nodi Director
+LOAD CSV FROM 'file:///directors.csv' AS line
+CREATE (:Director { name: line[0]})
+
+//Creazione delle relazioni film regista 
+LOAD CSV FROM 'file:///FilmDirectors.csv' AS line FIELDTERMINATOR '*'
+match (d: Director), (f:Film)
+where f._id = line[0] and d.name = line[1]
+CREATE (d)-[dir: DIRECTED]->(f)
+
+//Query per poter consigliare film:
+	- Si cercano gli utenti che hanno visto gli stessi film di un certo utente
+	- Si selezionano gli utenti che hanno valutato i film come un certo utente 
+	- Si cercano all'interno di questa cerchia di utenti i film valutati più positivamente 
+	- Si ordinano in maniera decrescente e si mostrano i primi 25
+
+MATCH (me:User {username:'timonthy198'})-[my:ADDED]->(m:Film)
+MATCH (other:User)-[their:ADDED]->(m)
+WHERE me <> other
+AND abs(my.rating - their.rating) < 2
+WITH other,m
+MATCH (other)-[otherRating:ADDED]->(movie:Film)
+WHERE movie <> m
+WITH avg(otherRating.rating) AS avgRating, movie
+RETURN movie
+ORDER BY avgRating desc
+LIMIT 25
+
+//Query per conisgliare film:
+	- Si cercano i film visti dall'utente 
+	- Si cercano gli attori di questi film
+	- Si cercano film in cui recitano questi attori; si mostrano solo i film non visti dall'utente con più attori in comune con i film visti dall'utente 
+
+MATCH (u:User {username:'timonthy198'})-[:ADDED]->(f:Film)
+MATCH (a:Actor)-[:ACTED_IN]->(f)
+MATCH (a)-[r:ACTED_IN]->(movie:Film)
+WHERE f <> movie
+WITH movie, count(DISTINCT r) AS commonActors
+RETURN movie
+ORDER BY commonActors DESC
+LIMIT 25
+
+//Query per consigliare film:
+	- Si cercano i film visti dall'utente 
+	- Si cercano i registi di questi film
+	- Si cercano film diretti da questi registi ; si mostrano solo i film non visti dall'utente con più registi in comune con i film visti dall'utente 
+
+MATCH (u:User {username:'timonthy198'})-[:ADDED]->(f:Film)
+MATCH (d:DIRECTOR)-[:DIRECTED]->(f)
+MATCH (d)-[r:DIRECTED]->(movie:Film)
+WHERE f <> movie
+WITH movie, count(DISTINCT r) AS commonDirectors
+RETURN movie, commonDirectors
+ORDER BY commonDirectors DESC
+LIMIT 25
+
+//Query per trovare film simili in base a quanti sono i generi che hanno in comune
+MATCH (m:Film {original_title:'Pulp Fiction'})
+MATCH (m)-[:LABELED]->(g:Genre)
+MATCH (movie:Film)-[r:LABELED]->(g)
+WHERE m <> movie
+WITH movie, count(DISTINCT r) AS commonGenres
+RETURN movie
+ORDER BY commonGenres DESC
+LIMIT 25
+
+//Analisi indice username
+la prima analitics senza l'utilizzo dell'indice deve effettuare la : NodeByLabelScan ossia lo scan di tutti i nodi utente per poter effettuare la query. 
+	viene resituito infatti mediante l'utilizzo della funzione explain:
+
+		10007 estimated rows
+
+con l'indice viene fatto lo scan mediante NodeIndexSeek ossia si utilizza semplicemente l'indice sullo username. In questo modo il risultato dlela funzione explain sarà 
+
+		1 estimated rows
+
+viene effettuato lo scan di solamente un nodo utente. È evidente quindi il miglioramento in seguito all'inserimento del nodo.
+
+
+//indice original title
+
+senza indice viene fatto uno scan di tutti i nodi Film cioè 5630 con l'indice viene fatto lo scan mediante NoseIndexSeek, quindi viene fatto lo scan di un unico nodo. 
+
+
+
+
+
+
+
+
